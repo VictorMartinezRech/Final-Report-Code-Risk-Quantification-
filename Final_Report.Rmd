@@ -1,0 +1,756 @@
+---
+title: "Trabajo"
+author: "Víctor Martínez Rech"
+date: "19/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Descarga de datos
+
+En primer lugar, descargamos los datos de la página de Yahoo Finance. Estos son series temporales de de tres empresas automovilísticas que cotizan en dólares americanos (USD).
+
+```{r}
+#install.packages("quantmod")
+library(quantmod)
+
+#Empresa Ford
+getSymbols("F", src='yahoo', from = "2019-10-19",to = "2021-10-21")
+head(F)
+eqF<- F[,6]
+nrow(eqF)
+
+#Empresa General Motors
+getSymbols("GM", src='yahoo', from = "2019-10-19",to = "2021-10-21")
+head(GM)
+eqGM<-GM[,6]
+nrow(eqGM)
+
+#Empresa Volkswagen
+getSymbols("VWAGY", src='yahoo', from = "2019-10-19",to = "2021-10-21")
+head(VWAGY)
+eqVWAGY<-VWAGY[,6]
+nrow(eqVWAGY)
+
+#DOW JONES stock index
+getSymbols("^DJI", src='yahoo', from = "2019-10-19",to = "2021-10-21")
+head(DJI)
+eqDJI<- DJI[,6]
+nrow(eqDJI)
+```
+
+Guardamos los precios de cierre en una base de datos externa para poder usarlo de manera más rápida.
+
+```{r}
+save(eqF, file = "D:/MESIO/1r Semestre/Quantificació de Riscos/Práctica/Trabajo/F.RData")
+save(eqGM, file = "D:/MESIO/1r Semestre/Quantificació de Riscos/Práctica/Trabajo/GM.RData")
+save(eqVWAGY, file = "D:/MESIO/1r Semestre/Quantificació de Riscos/Práctica/Trabajo/VWAGY.RData")
+save(eqDJI, file = "D:/MESIO/1r Semestre/Quantificació de Riscos/Práctica/Trabajo/DJI.RData")
+```
+
+También creamos un archivo Excel para guardar todos los datos.
+
+```{r}
+#write.csv2(F, "F.csv")
+#write.csv2(GM, "GM.csv", row.names = TRUE)
+#write.csv2(VWAGY, "VWAGY.csv", row.names = TRUE)
+#write.csv2(DJI, "DJI.csv", row.names = TRUE)
+
+d_F <- read.csv2("F.csv")
+d_GM <- read.csv2("GM.csv")
+d_VWAGY <- read.csv2("VWAGY.csv")
+d_DJI <- read.csv2("DJI.csv")
+
+d_F <- d_F[,c(1,7)]
+d_GM <- d_GM[,7]
+d_VWAGY <- d_VWAGY[,7]
+d_DJI <- d_DJI[,7]
+
+datos <- cbind(d_F,d_GM,d_VWAGY, d_DJI)
+colnames(datos)[1:5] <- c("Fecha", "Precio F", "Precio GM", "Precio VWAGY", "Precio DJI")
+datos
+
+#write.csv(datos, "Datos Trabajo.csv")
+```
+
+#### Cargamos los datos
+
+Cargamos las cotizaciones diarias a cierre (ajustado) de las compañías:
+
+```{r}
+setwd("D:/MESIO/1r Semestre/Quantificació de Riscos/Práctica/Trabajo")
+load("F.RData")
+load("GM.RData")
+load("VWAGY.RData")
+load("DJI.RData")
+```
+
+En primer lugar, miramos si los datos siguen o se aproximan a una distribución Normal.
+
+```{r}
+val <- as.matrix(datos[,2:4])
+n <- nrow(val)
+val.ln <- diff(log(val))
+
+qqnorm(val.ln[,"Precio F"])
+qqline(val.ln[,"Precio F"])
+
+qqnorm(val.ln[,"Precio GM"])
+qqline(val.ln[,"Precio GM"])
+
+qqnorm(val.ln[,"Precio VWAGY"])
+qqline(val.ln[,"Precio VWAGY"])
+```
+
+Después de mirar-lo de manera gráfica, lo comprobamos mediante un test de normalidad.
+
+```{r}
+library(fBasics)
+normalTest(val.ln[,"Precio F"], "jb") 
+normalTest(val.ln[,"Precio GM"], "jb")
+normalTest(val.ln[,"Precio VWAGY"], "jb")
+```
+
+Para tener una mayor información de las series, miramos los gráficos de sus precios y del logaritmo de los precios.
+
+```{r}
+plot(val[,"Precio F"],type="l", ylim = c(0, 65))
+lines(val[,"Precio GM"],lty=2, col="blue")
+lines(val[,"Precio VWAGY"],lty=3, col="green")
+
+plot(val.ln[,"Precio F"],type="l")
+lines(val.ln[,"Precio GM"],lty=2, col="blue")
+lines(val.ln[,"Precio VWAGY"],lty=3, col="green")
+```
+
+#### Ejercicio 1
+
+#### Varianza-Covarianza
+
+En primer lugar, calculamos tanto los valores de la media de los cambios en los factores de riesgo como los valores de la matriz de varianza-covarianza de estos cambios.
+
+```{r}
+E.ln <- colMeans(val.ln)
+E.ln <-as.matrix(E.ln)
+Cov.ln <- var(val.ln)
+Covn.ln <- (n-1)*Cov.ln/n
+Covn.ln <- as.matrix(Covn.ln)
+```
+
+Una vez tenemos estos valores, calculamos los pesos de la cartera utilizando Markowitz. El "desired return" con el que calculamos los pesos es 0.01% ya que estamos utilizando datos diarios (por eso es un valor pequeño). Con estos calcularemos la esperanza y la varianza de la pérdida linealizada para t=1.
+
+```{r}
+w <- c(0.4306,0.1577,0.4118) #En vez, de utilizar unos valores para la cartera (como en el excel), utilizamos los pesos calculados por Markowitz (por eso el Var y ES dan un valor distinto al del excel, ya que este toma valores iniciales en la cartera)
+names(w) <- c("F", "GM", "VWAGY")
+w <- as.matrix(w)
+sum(w)
+V <- 1
+
+EL <-- V*t(w)%*%E.ln
+VL <- V^2*(t(w)%*%Covn.ln%*%w)
+```
+
+Finalmente, para calcular el VaR y el ES, fijamos un nivel de confianza ($\alpha = 0.99$).
+Primero lo haremos con la pérdida linealizada distribuida como una Normal.
+
+```{r}
+alfa <- 0.99
+
+VaR.N <- qnorm(alfa,EL,sqrt(VL))
+VaR.N #tengo una probabilidad de un 1% de perder el VaR.N*100% de mi inversión 
+
+ES.N <- EL+sqrt(VL)*dnorm(qnorm(alfa))/(1-alfa)
+ES.N #tengo una probabilidad de un 1% de perder el ES.N*100% de mi inversión
+```
+
+Ahora lo hacemos con la pérdida linealizada distribuida como una t-student con 4 grados de libertad.
+
+```{r}
+mu <- EL
+nu <- 4
+sigma2 <- VL * (nu-2)/nu
+qt(alfa, nu)
+
+VaR.t <- mu +sqrt(sigma2)*qt(alfa,nu)
+VaR.t #tengo una probabilidad de un 1% de perder el VaR.t*100% de mi inversión
+
+ES.t<-EL+sqrt(sigma2)*( dt(qt(alfa, nu), nu)/(1-alfa) )*(nu+qt(alfa, nu)*qt(alfa, nu))/(nu-1)
+ES.t #tengo una probabilidad de un 1% de perder el ES.t*100% de mi inversión
+```
+
+#### Simulación histórica
+
+En primer lugar, calcularemos la simulación histórica de pérdidas y miraremos si sigue una distribución Normal.
+
+```{r}
+SH.L<-(-V)*(val.ln%*%w)
+SH.L
+summary(SH.L)
+hist(SH.L)
+qqnorm(SH.L)
+qqline(SH.L)
+```
+
+Ajustamos la simulación histórica de pérdidas a una distribución normal.
+
+```{r}
+library(QRM)
+library(MASS)
+library(fBasics)
+library(ghyp)
+library(akima)
+
+mod.gauss <- fit.norm(SH.L) # $Sigma (con la S mayúscula) es el sigma^2
+attributes(mod.gauss)
+```
+
+Ajustamos la simulación histórica de pérdidas a una distribución t-student.
+
+```{r}
+mod.t <- fit.st(SH.L)
+attributes(mod.t)
+```
+
+Comparamos los modelos para ver cuál tiene un menor AIC, y por lo tanto, ofrece un mejor ajuste.
+
+```{r}
+AIC_n<-2*2-2*mod.gauss$ll.max
+AIC_t<-2*3-2*mod.t$ll.max
+```
+
+En este caso, se ha visto que el modelo ajustado a una t-student, ajusta mejor las pérdidas.
+
+```{r}
+qnorm(alfa,mean=mod.gauss$mu,sd=sqrt(mod.gauss$Sigma)) #VaR
+ESnorm(alfa,mu=mod.gauss$mu,sd=sqrt(mod.gauss$Sigma)) #ES
+
+#Utilizamos la aproximación de 4 grados de libertad (igual que en el excel)
+qst(alfa,4,mu=mod.t$par.ests[2], sd=mod.t$par.ests[3])
+ESst(alfa,4,mu=mod.t$par.ests[2], sd=mod.t$par.ests[3])
+
+#Utilizamos los grados de libertad que calcula R por máxima verosimilitud. En este caso, tenemos 3.23 grados de libertad
+qst(alfa,mod.t$par.ests[1],mu=mod.t$par.ests[2], sd=mod.t$par.ests[3]) #VaR
+ESst(alfa,mod.t$par.ests[1],mu=mod.t$par.ests[2], sd=mod.t$par.ests[3]) #ES
+
+VaR99 <- quantile(SH.L,alfa)
+ES99 <- mean(SH.L[SH.L > VaR99])
+VaR99
+ES99
+```
+
+#### Monte-Carlo
+
+Finalmente, utilizaremos la simulación de Monte-Carlo para ver el comportamiento de los cambios en los factores de riesgo.
+
+##### i. Multivariate Normal
+
+```{r}
+rep <- 1000000
+MC.data <- rmvnorm(rep, E.ln, Covn.ln)
+
+MC.data <-as.matrix(MC.data)
+MC.Lsim <- (MC.data%*%w)
+MC.Lsim <- -V*MC.Lsim
+quantile(MC.Lsim, alfa) #VaR
+mean(MC.Lsim[MC.Lsim > quantile(MC.Lsim, alfa)]) #ES
+```
+
+##### ii. Multivariate T-Student
+
+```{r}
+MC.data1 <- rmvt(rep, Covn.ln, mod.t$par.ests[1], E.ln)
+MC.data1 <-as.matrix(MC.data1)
+MC.Lsim1 <- (MC.data1%*%w)
+MC.Lsim1 <- -V*MC.Lsim1
+quantile(MC.Lsim1, alfa) #VaR
+mean(MC.Lsim1[MC.Lsim1 > quantile(MC.Lsim1, alfa)]) #ES
+
+MC.data1 <- rmt(rep, mod.t$par.ests[1], E.ln, Covn.ln)
+MC.data1 <-as.matrix(MC.data1)
+MC.Lsim1 <- (MC.data1%*%w)
+MC.Lsim1 <- -V*MC.Lsim1
+quantile(MC.Lsim1, alfa) #VaR
+mean(MC.Lsim1[MC.Lsim1 > quantile(MC.Lsim1, alfa)]) #ES
+```
+
+##### iii. Generalized hyperbolic (seleccionar el mejor modelo)
+
+En el caso de las distribuciones hiperbólicas generalizadas, las ajustaremos todas y miraremos cuál de estas tiene un menor AIC.
+
+###### Gaussian distribution
+
+```{r}
+mod.gauss <- fit.gaussmv(val.ln)
+AIC(mod.gauss)
+```
+
+
+###### Symmetric Student-t Distribution
+
+```{r}
+mod.ts <- fit.tmv(val.ln,symmetric = TRUE)
+AIC(mod.ts)
+```
+
+###### Asymmetric Student-t Distribution
+
+```{r}
+mod.ta <- fit.tmv(val.ln, symmetric = FALSE)
+AIC(mod.ta)
+```
+
+###### Symmetric Hyperbolic Distribution
+
+```{r}
+mod.hyps<- fit.hypmv(val.ln,symmetric = TRUE)
+AIC(mod.hyps)
+```
+
+###### Asymmetric Hyperbolic Distribution
+
+```{r}
+mod.hypa<- fit.hypmv(val.ln,symmetric = FALSE)
+AIC(mod.hypa)
+```
+
+###### Symmetric Normal Inverse Gaussian Distribution
+
+```{r}
+mod.nigs<- fit.NIGmv(val.ln,symmetric = TRUE)
+AIC(mod.nigs)
+```
+
+###### Asymmetric Normal Inverse Gaussian Distribution
+
+```{r}
+mod.niga<- fit.NIGmv(val.ln,symmetric = FALSE)
+AIC(mod.niga)
+```
+
+###### Symmetric Variance Gamma Distribution
+
+```{r}
+mod.vgs<- fit.VGmv(val.ln,symmetric = TRUE)
+AIC(mod.vgs)
+```
+
+###### Asymmetric Variance Gamma Distribution
+
+```{r}
+mod.vga<- fit.VGmv(val.ln,symmetric = FALSE)
+AIC(mod.vga)
+```
+
+###### Symmetric Generalized Hyperbolic Distribution
+
+```{r}
+mod.ghyps<- fit.ghypmv(val.ln,symmetric = TRUE)
+AIC(mod.ghyps)
+```
+
+###### Asymmetric Generalized Hyperbolic Distribution
+
+```{r}
+mod.ghypa<- fit.ghypmv(val.ln,symmetric = FALSE)
+AIC(mod.ghypa)
+```
+
+Comparando los AIC, podemos observar como la "Symmetric Student-t Distribution" es la que nos da un menor AIC, por lo que haremos la simulación de Montecarlo para calcular el VaR y el ES para este ajuste.
+
+```{r}
+r<-1000000  
+Sim_val.ln_ts<-rghyp(r, mod.ts)
+MC.Lsim <- -V*(Sim_val.ln_ts%*%w)
+quantile(MC.Lsim, alfa)
+mean(MC.Lsim[MC.Lsim > quantile(MC.Lsim, alfa)])
+```
+
+##### Gumbel copula with normal and t-Student marginals
+
+En primer lugar, para poder utilizar las cópulas debemos calcular las correlaciones entre las empresas mediante la correlación por rangos de Kendall.
+
+```{r}
+rotau<-Kendall(val.ln)
+rotau
+```
+
+Entonces estimamos los parámetros para cada empresa en la cartera y guardamos el valor más alto.
+
+```{r}
+ParGum1<-1/(1-rotau[1,2])
+ParGum1
+
+ParGum2<-1/(1-rotau[1,3])
+ParGum2
+
+ParGum3<-1/(1-rotau[2,3])
+ParGum3
+
+ParGum<-max(ParGum1,ParGum2,ParGum3)
+Par <- c(ParGum1, ParGum2, ParGum3)
+names(Par) <- c("F", "GM", "VWAGY")
+Par
+```
+
+En primer lugar, definimos el objeto cópula.
+
+```{r}
+library(QRM)
+library(copula)
+
+gumb.cop <- gumbelCopula(ParGum, dim =3)
+gumb.cop
+```
+
+Luego ajustamos la cópula y estimamos los parámetros.
+
+```{r}
+Udata <- pobs(val.ln)
+gumbCopEst<-fitCopula(gumb.cop,Udata, method="mpl")
+gumbCopEst
+AIC(gumbCopEst)
+```
+
+Una vez tenemos el ajuste, realizamos la simulación de las U procedentes de la cópula estimada.
+
+```{r}
+gumb.cop_est<- gumbelCopula(gumb.cop@parameters, dim =3)
+
+Sim_val.ln_gumbelcopula <- rCopula(r, gumb.cop_est)
+```
+
+Ahora ajustamos las marginales, tanto de la Normal como de la t-Student.
+
+```{r}
+mod.GAUSS1 <- fit.norm(val.ln[,1])
+aic<-4-2*mod.GAUSS1$ll.max
+aic
+
+mod.GAUSS2 <- fit.norm(val.ln[,2])
+aic<-4-2*mod.GAUSS2$ll.max
+aic
+
+mod.GAUSS3 <- fit.norm(val.ln[,3])
+aic<-4-2*mod.GAUSS3$ll.max
+aic
+
+mod.t1 <- fit.st(val.ln[,1]) 
+aic<-6-3*mod.t1$ll.max
+aic
+
+mod.t2 <- fit.st(val.ln[,2])
+aic<-6-3*mod.t2$ll.max
+aic
+
+mod.t3 <- fit.st(val.ln[,3])
+aic<-6-3*mod.t3$ll.max
+aic
+```
+
+Finalmente, tanto para las marginales Normales como para las marginales t-Student realizamos la simulación de Montecarlo.
+
+```{r}
+#Normal   
+ 
+sim.val.ln1 <- qnorm(Sim_val.ln_gumbelcopula[,1], mean=mod.GAUSS1$mu, sd=sqrt(mod.GAUSS1$Sigma))
+sim.val.ln2 <- qnorm(Sim_val.ln_gumbelcopula[,2], mean=mod.GAUSS2$mu, sd=sqrt(mod.GAUSS2$Sigma))
+sim.val.ln3 <- qnorm(Sim_val.ln_gumbelcopula[,3], mean=mod.GAUSS3$mu, sd=sqrt(mod.GAUSS3$Sigma))
+Sim_val.ln_norm <- cbind(sim.val.ln1,sim.val.ln2,sim.val.ln3)
+MC.Lsim <- -V*(Sim_val.ln_norm%*%w)
+quantile(MC.Lsim, alfa)
+mean(MC.Lsim[MC.Lsim > quantile(MC.Lsim, alfa)])
+
+
+#t-Student
+
+sim.val.ln1t <- qst(Sim_val.ln_gumbelcopula[,1], mu=mod.t1$par.ests[2], sd=mod.t1$par.ests[3],mod.t1$par.ests[1])
+sim.val.ln2t <- qst(Sim_val.ln_gumbelcopula[,2], mu=mod.t2$par.ests[2], sd=mod.t2$par.ests[3],mod.t2$par.ests[1])
+sim.val.ln3t <- qst(Sim_val.ln_gumbelcopula[,3], mu=mod.t3$par.ests[2], sd=mod.t3$par.ests[3],mod.t3$par.ests[1])
+Sim_val.ln_t <- cbind(sim.val.ln1t,sim.val.ln2t,sim.val.ln3t)
+MC.Lsim <- -V*(Sim_val.ln_t%*%w)
+quantile(MC.Lsim, alfa)
+mean(MC.Lsim[MC.Lsim > quantile(MC.Lsim, alfa)])
+```
+
+##### Clayton copula with normal and t-Student marginals
+
+Estimamos los parámetros para cada empresa en la cartera y guardamos el valor más alto.
+
+```{r}
+ParClay1<-(2*rotau[1,2])/(1-rotau[1,2])
+ParClay1
+
+ParClay2<-(2*rotau[1,3])/(1-rotau[1,3]) 
+ParClay2
+
+ParClay3<-(2*rotau[2,3])/(1-rotau[2,3])
+ParClay3
+
+ParClay<-max(ParClay1,ParClay2,ParClay3)
+Par <- c(ParClay1, ParClay2, ParClay3)
+names(Par) <- c("F", "GM", "VWAGY")
+Par
+```
+
+En primer lugar, definimos el objeto cópula.
+
+```{r}
+clay.cop<- claytonCopula(param =ParClay, dim = 3)    
+clay.cop
+```
+
+Luego ajustamos la cópula y estimamos los parámetros.
+
+```{r}
+ClayCopEst<-fitCopula(clay.cop, Udata, method="mpl")
+ClayCopEst
+AIC(ClayCopEst)
+```
+
+Una vez tenemos el ajuste, realizamos la simulación de las U procedentes de la cópula estimada.
+
+```{r}
+clay.cop_est<- claytonCopula(attributes(ClayCopEst)$estimate , dim = 3)
+
+Sim_val.ln_clayC<-rCopula(r,clay.cop_est) #Valores simulados
+```
+
+Ahora, con las marginales ajustadas anteriormente realizamos la simulación de Montecarlo tanto para la Normal como para la t-Student.
+
+```{r}
+# Marginales Normales ###    
+
+sim.val.ln1c <- qnorm(Sim_val.ln_clayC[,1], mean=mod.GAUSS1$mu, sd=sqrt(mod.GAUSS1$Sigma))
+sim.val.ln2c <- qnorm(Sim_val.ln_clayC[,2], mean=mod.GAUSS2$mu, sd=sqrt(mod.GAUSS2$Sigma))
+sim.val.ln3c <- qnorm(Sim_val.ln_clayC[,3], mean=mod.GAUSS3$mu, sd=sqrt(mod.GAUSS3$Sigma))
+Sim_val.ln_norm <- cbind(sim.val.ln1c,sim.val.ln2c,sim.val.ln3c)
+MC.Lsim <- -V*(Sim_val.ln_norm%*%w)
+quantile(MC.Lsim, alfa)
+mean(MC.Lsim[MC.Lsim > quantile(MC.Lsim, alfa)])
+
+# Marginales t-Student ### 
+
+sim.val.ln1ct <- qst(Sim_val.ln_clayC[,1], mu=mod.t1$par.ests[2], sd=mod.t1$par.ests[3],mod.t1$par.ests[1])
+sim.val.ln2ct <- qst(Sim_val.ln_clayC[,2], mu=mod.t2$par.ests[2], sd=mod.t2$par.ests[3],mod.t2$par.ests[1])
+sim.val.ln3ct <- qst(Sim_val.ln_clayC[,3], mu=mod.t3$par.ests[2], sd=mod.t3$par.ests[3],mod.t3$par.ests[1])
+Sim_val.ln_t <- cbind(sim.val.ln1ct,sim.val.ln2ct,sim.val.ln3ct)
+MC.Lsim <- -V*(Sim_val.ln_t%*%w)
+quantile(MC.Lsim, alfa) #Esta cópula da más pérdidas que la anterior
+mean(MC.Lsim[MC.Lsim > quantile(MC.Lsim, alfa)])
+```
+
+#### Ejercicio 2
+
+En primer lugar, realizaremos un test de normalidad tanto a los precios de las empresas de la cartera como al precio del índice bursátil.
+
+```{r}
+T<-nrow(datos)
+
+X<-cbind(datos$`Precio F`,datos$`Precio GM`,datos$`Precio VWAGY`)
+summary(X)
+
+F<-cbind(datos$`Precio DJI`)
+
+#NORMALITY TEST
+library(QRM)
+
+MardiaTest(X)
+jointnormalTest(X)
+MardiaTest(F)
+jointnormalTest(F)
+```
+
+##### With an observed factor (DJ)
+
+Para hacer este apartado, nos piden que usemos un factor observable, como un índice bursátil. Por lo tanto, usaremos el Dow Jones (DJ), ya que las empresas de la cartera cotizan en dólares. Entonces, ajustaremos los precios a un modelo de regresión lineal y utilizaremos los coeficientes obtenidos para calcular la matriz de correlaciones entre los errores.
+
+```{r}
+mreg<-lm(X~F)
+mreg
+summary(mreg)
+B<-coef(mreg)
+B
+B<-B[2:2,]
+B<-t(t(B))
+B
+SX<-var(X)
+SX
+SF<-var(F)
+SF
+BB<-B%*%SF%*%t(B)
+BB
+upsi<-SX-BB
+upsi
+es_e<-sqrt(diag(diag(upsi)))
+es_e
+ies_e<-solve(es_e)
+ies_e
+Rupsi_of<-ies_e%*%upsi%*%ies_e
+
+rownames(Rupsi_of) <- c("F", "GM", "VWAGY")
+colnames(Rupsi_of) <- c("F", "GM", "VWAGY")
+Rupsi_of
+```
+
+##### With an unobserved factor
+
+Para hacer este apartado, nos piden que usemos un factor no observable, que en este caso será la primera componente principal, que explica el valor del mercado. Entonces, usando los valores y vectores propios de la matriz de la matriz de varianzas y covarianzas de los precios de las empresas de la cartera, calcularemos la matriz de correlaciones entre los errores.
+
+```{r}
+valvec<-eigen(SX)
+valvec
+val<-valvec$values
+val
+cp<-c(1,2,3)
+plot(cp,val,"l")
+varexp<-(val/sum(val))*100
+varexp
+vec<-valvec$vectors
+B<-vec[,1:1]
+B
+B<-t(t(B))
+B
+omega<-val[1:1]
+omega
+BB<-B%*%omega%*%t(B)
+BB
+SX
+upsi<-SX-BB
+upsi
+comun<-(diag(BB)/diag(SX))*100
+comun
+es_e<-sqrt(diag(diag(upsi)))
+ies_e<-solve(es_e)
+Rupsi_nof<-ies_e%*%upsi%*%ies_e
+Rupsi_nof
+```
+
+#### Ejercicio 3
+
+```{r}
+val.ln <- as.matrix(val.ln) 
+n<-nrow(val.ln)
+n
+```
+
+##### Analyse if the behaviour of the right tail of the loss distribution is exponential type or Pareto type
+
+```{r}
+#### Calculamos media, S_{n-1} y S_{n} para los cambios en los logaritmos de las cotizaciones mediante la Simulación Histórica
+SH.L<--(val.ln%*%w)
+summary(SH.L)
+L_pos<-SH.L[(SH.L>0)] #Nos quedamos con las pérdidas positivas
+summary(L_pos)
+np<-length(L_pos) 
+L_pos<-L_pos[order(L_pos)]
+q<-0.99 #Quantile 99 (VaR 99% confidence)
+```
+
+
+```{r}
+# Ajuste de distribuciones tipo exponencial para las pérdidas positivas
+x0.L=rep(0,length(L_pos))
+x=seq(0,0.1,length=2000)
+
+library(MASS)
+
+# Weibull
+par.W<-fitdistr(L_pos,"weibull")
+par.W
+AIC(par.W)
+Den.Weibull.L<-dweibull(x,par.W[[1]][1],par.W[[1]][2])
+par(mfrow=c(1,1))
+plot(x,Den.Weibull.L,type="l",col=1,xlab="Tamaño",
+     xlim=c(0,0.1),ylab="Probability",main='Weibull Distribution',cex.main=0.9,col.main=1)
+points(L_pos,x0.L,col=1)
+
+VaR_Weibull=qweibull(q,par.W[[1]][1],par.W[[1]][2])
+
+VaR_Weibull
+```
+
+
+
+```{r}
+# Lognormal
+par.Ln<-fitdistr(L_pos,"log-normal")
+par.Ln
+AIC(par.Ln)
+lx=log(x)
+Den.ln.L<-dnorm(lx,par.Ln[[1]][1],par.Ln[[1]][2])
+Den.ln.L<-Den.ln.L/x
+par(mfrow=c(1,1))
+plot(x,Den.ln.L,type="l",col=1,xlab="Tamaño",
+     xlim=c(0,0.1),ylab="Probability",main='Log-normal Distribution',cex.main=0.9,col.main=1)
+points(L_pos,x0.L,col=1)
+
+VaR_Ln=qnorm(q,par.Ln[[1]][1],par.Ln[[1]][2])
+VaR_Ln=exp(VaR_Ln)
+
+VaR_Ln
+```
+
+
+```{r}
+# Análisis de valores extremos
+library(evmix)
+library(evir)
+library(ercv)
+library(condmixt)
+
+hp <- hillplot(L_pos)
+meplot(L_pos)
+cvplot(L_pos)
+```
+
+En el hillplot obtenemos el valor de la ksi, que es 0.46. Dado que la ksi es mayor a 0, asumimos que el comportamiento de la cola de la distribución de pérdidas es la Pareto. 
+
+##### Fit the distribution that best reflects the behaviour of the tail of your variable loss and estimate the VaR at 99% confidence.
+
+Finalmente calculamos el estimador del índice de la cola.
+
+```{r}
+L<-sort(L_pos, decreasing = FALSE)
+ne<-sum(L>0.0037)
+Hpar<-hillest(L, ne)
+Hpar
+```
+
+Entonces calcularemos el riesgo de una Pareto.
+
+```{r}
+# Riesgo con Pareto
+npos<-length(L_pos)
+fr<-(npos-ne)/npos
+fr #Calculamos el porcentaje de la parte gris (no truncada)
+alfa<-q-fr
+alfa #nivel de confianza en la distribución truncada
+k<-L[npos-ne+1]
+k
+    
+VaR.Par<-k/((1-alfa/(1-fr))**(1/Hpar))
+VaR.Par
+```
+
+Podemos observar el riesgo obtenido con la Pareto.
+
+```{r}
+# GPD
+th<- 0.003746313 
+par.GPD<-gpd(L_pos, threshold = th)
+par.GPD
+??gpd
+LTh<-L[(L>=th)]
+nth<-length(LTh)
+fr<-(npos-nth)/npos
+fr
+conf<-q-fr
+conf
+VaR_GPD=qgpd((conf/(1-fr)),par.GPD$par.ests[1],0, par.GPD$par.ests[2])
+VaR_GPD+th
+```
+
+Podemos observar el riesgo obtenido con la GPD.
